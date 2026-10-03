@@ -95,7 +95,19 @@ export function Sheet({
           </button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">{open && children}</div>
+      {/*
+        flex-1（flex-basis: 0%）にすると、iOS の Safari では高さが中身に合わせて決まる dialog の中で
+        本文の高さが 0 として計算され、見出ししか表示されない。flex-auto で中身の高さを基準にする
+      */}
+      <div
+        className={cx(
+          'min-h-0 flex-auto overflow-y-auto overscroll-contain px-4',
+          // 下のボタンが無いシートは、iPhone のホームインジケーターに中身が隠れないよう余白を取る
+          footer ? 'pb-4' : 'pb-[calc(16px+env(safe-area-inset-bottom))]',
+        )}
+      >
+        {open && children}
+      </div>
       {footer && open && (
         <div className="flex-none border-t border-line px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3">
           {footer}

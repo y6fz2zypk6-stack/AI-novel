@@ -121,6 +121,28 @@ function errorFor(model) {
   return null;
 }
 
+// MOCK_MANY_MODELS=1 のとき、OpenRouter のような長いモデルIDを数百件返す（画面の確認用）
+const LONG_IDS = [
+  ['anthropic/claude-opus-5.5', 'Anthropic: Claude Opus 5.5'],
+  ['anthropic/claude-sonnet-5.5', 'Anthropic: Claude Sonnet 5.5'],
+  ['google/gemini-2.5-flash-image-preview', 'Google: Gemini 2.5 Flash Image Preview (Nano Banana)'],
+  ['nousresearch/hermes-3-llama-3.1-405b:free', 'Nous: Hermes 3 405B Instruct (free)'],
+  ['meta-llama/llama-3.3-70b-instruct:free', 'Meta: Llama 3.3 70B Instruct (free)'],
+  ['deepseek/deepseek-r1-distill-llama-70b', 'DeepSeek: R1 Distill Llama 70B'],
+  ['mistralai/mistral-small-3.2-24b-instruct-2506', 'Mistral: Mistral Small 3.2 24B Instruct 2506'],
+];
+const MANY_MODELS = process.env.MOCK_MANY_MODELS
+  ? [
+      ...LONG_IDS.map(([id, name]) => ({ id, name, context_length: 1048576, architecture: { output_modalities: ['text'] } })),
+      ...Array.from({ length: 400 }, (_, i) => ({
+        id: `vendor${i % 40}/very-long-model-name-for-layout-check-${i}-instruct-preview`,
+        name: `Vendor ${i % 40}: Very Long Model Name For Layout Check ${i} Instruct Preview`,
+        context_length: 131072,
+        architecture: { output_modalities: ['text'] },
+      })),
+    ]
+  : [];
+
 /** 呼び出しの記録（テストから GET /__calls で見られる） */
 const calls = [];
 
@@ -140,6 +162,7 @@ const server = http.createServer(async (req, res) => {
         { id: 'mock/writer', name: 'Mock Writer', context_length: 200000, architecture: { output_modalities: ['text'] } },
         { id: 'mock/think', name: 'Mock Thinker', context_length: 200000, architecture: { output_modalities: ['text'] } },
         { id: 'mock/image', name: 'Mock Image', context_length: 0, architecture: { output_modalities: ['image'] } },
+        ...MANY_MODELS,
       ],
     });
   }

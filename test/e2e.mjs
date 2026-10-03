@@ -70,7 +70,8 @@ async function snap(page, name) {
 }
 
 async function main() {
-  start('node', ['scripts/mock-llm.mjs'], { MOCK_PORT: String(MOCK_PORT), MOCK_DELAY_MS: '25' });
+  // OpenRouter と同じくらい長いモデル一覧を返させる（シートの表示崩れを確かめるため）
+  start('node', ['scripts/mock-llm.mjs'], { MOCK_PORT: String(MOCK_PORT), MOCK_DELAY_MS: '25', MOCK_MANY_MODELS: '1' });
   start('node_modules/.bin/next', ['start', '-H', '127.0.0.1', '-p', String(APP_PORT)], { DATA_DIR: dataDir });
   await waitFor(`http://127.0.0.1:${MOCK_PORT}/v1/models`);
   await waitFor(`${BASE}/api/settings`);
@@ -259,6 +260,22 @@ async function main() {
   await page.getByRole('heading', { name: 'PROVIDER' }).waitFor();
   assert(await page.getByText('sk-or-••••••••3f2a').isVisible(), 'API キーは伏せ字で表示');
   await snap(page, 'settings');
+
+  console.log('Settings — 既定モデルの選択シート');
+  await page.getByRole('button', { name: /^執筆/ }).click();
+  const sheet = page.getByRole('dialog', { name: '既定モデル（執筆）' });
+  await sheet.getByText('anthropic/claude-opus-5.5').waitFor();
+  await page.waitForTimeout(350); // 開くときのアニメーションが終わるのを待つ
+  const box = await sheet.boundingBox();
+  const vh = page.viewportSize().height;
+  assert(box && box.height > vh * 0.6, `一覧の多いシートは画面の大部分を使う（高さ ${box?.height}）`);
+  assert(box && Math.abs(box.y + box.height - vh) < 2, `シートは画面の下端に付く（y=${box?.y} h=${box?.height} vh=${vh}）`);
+  await snap(page, 'settings-model-sheet');
+  await sheet.getByRole('button', { name: 'mock/think' }).click();
+  await page.getByText('mock/think').first().waitFor();
+  await page.getByRole('button', { name: /^執筆/ }).click();
+  await page.getByRole('dialog', { name: '既定モデル（執筆）' }).getByRole('button', { name: 'mock/writer' }).click();
+  await page.getByRole('button', { name: /^執筆.*mock\/writer/ }).waitFor();
   await page.getByRole('link', { name: /OpenRouter/ }).click();
   await page.getByRole('button', { name: '接続テスト' }).click();
   await page.getByText('接続できました').waitFor();
