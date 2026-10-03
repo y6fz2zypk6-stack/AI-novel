@@ -1,0 +1,222 @@
+@import 'tailwindcss';
+
+/* デザイン仕様 §2 のトークン */
+@theme {
+  --color-bg: #ffffff;
+  --color-surface: #f5f4f1;
+  --color-surface-2: #eceae6;
+  --color-surface-tab: #f0eeea;
+  --color-bar: #faf9f7;
+  --color-line: #e2e0db;
+  --color-line-strong: #cfccc6;
+  --color-ink: #1f1e1c;
+  --color-ink-prose: #2b2a27;
+  --color-ink-sub: #3a3834;
+  --color-ink-muted: #6b6862;
+  --color-ink-tab: #77736c;
+  --color-accent: #e3a857;
+  --color-accent-on: #2a1a04;
+  --color-accent-ink: #9a5b0c;
+  --color-accent-strong: #7a4608;
+  --color-accent-soft: #fbebd3;
+  --color-accent-banner: #fdf4e6;
+  --color-accent-banner-line: #ebc48a;
+  --color-ok: #2e9d5b;
+  --color-neutral-bar: #a9a59e;
+  --color-danger: #b3261e;
+  --color-danger-soft: #fcedec;
+
+  --radius-chip: 20px;
+  --radius-field: 12px;
+  --radius-card: 16px;
+  --radius-sheet: 22px;
+}
+
+@theme inline {
+  --font-ui: var(--font-zen-kaku), 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  --font-prose: var(--font-shippori), 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root {
+  --prose-size: 15px;
+  --tabbar-h: 76px;
+  --dock-h: 76px;
+  --tabbar-space: 0px;
+  --dock-space: 0px;
+  color-scheme: light;
+}
+
+/* 基本のスタイル。@layer base に置き、Tailwind のユーティリティで上書きできるようにする */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    background: var(--color-bg);
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-tap-highlight-color: transparent;
+    overflow-wrap: anywhere;
+  }
+
+  /* シートを開いている間は背面をスクロールさせない */
+  html:has(dialog[open]) {
+    overflow: hidden;
+  }
+
+  button,
+  a {
+    touch-action: manipulation;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent-ink);
+    outline-offset: 2px;
+  }
+
+  /* 入力欄は枠の色と影でフォーカスを示す（デザイン仕様 §4.3） */
+  input:not([type='range']):not([type='checkbox']):focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+  }
+}
+
+/* ---- 下部の固定領域（タブバーと Action Dock）の高さを本文側の余白に反映する ---- */
+
+body:has(#tabbar) {
+  --tabbar-space: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+}
+
+body:has(#dock) {
+  --dock-space: var(--dock-h);
+}
+
+.page-main {
+  padding-bottom: calc(var(--tabbar-space) + var(--dock-space) + 28px);
+}
+
+#dock {
+  bottom: var(--tabbar-space);
+}
+
+body:not(:has(#tabbar)) #dock {
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+
+/* スマホで入力中はタブバーを隠して入力欄を広く使う */
+@media (pointer: coarse) {
+  body:has(:is(input:not([type='range']):not([type='checkbox']), textarea, select):focus) #tabbar {
+    display: none;
+  }
+  body:has(#tabbar):has(:is(input:not([type='range']):not([type='checkbox']), textarea, select):focus) {
+    --tabbar-space: 0px;
+  }
+}
+
+/* ---- 生成本文（デザイン仕様 §2.2 / §9） ---- */
+
+.prose-jp {
+  font-family: var(--font-prose);
+  font-size: var(--prose-size);
+  line-height: 1.9;
+  color: var(--color-ink-prose);
+  font-feature-settings: 'palt' 0;
+}
+
+.prose-jp p {
+  margin: 0 0 0.9em;
+}
+
+.prose-jp p.narration {
+  text-indent: 1em;
+}
+
+.prose-jp p.break {
+  text-align: center;
+  color: var(--color-ink-muted);
+}
+
+/* ---- ボトムシート ---- */
+
+dialog.sheet {
+  margin: auto auto 0;
+  padding: 0;
+  border: 0;
+  width: 100%;
+  max-width: 640px;
+  max-height: 88dvh;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+dialog.sheet[open] {
+  display: flex;
+  flex-direction: column;
+  animation: sheet-up 0.22s ease-out;
+}
+
+dialog.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+  animation: fade-in 0.22s ease-out;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(48px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.sheet[open],
+  dialog.sheet::backdrop {
+    animation: none;
+  }
+  .spin {
+    animation-duration: 2.4s;
+  }
+}
+
+/* 範囲スライダー（Settings の Temperature） */
+input[type='range'] {
+  accent-color: #c98a2e;
+}
+
+/* 数値入力の矢印を消す */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}

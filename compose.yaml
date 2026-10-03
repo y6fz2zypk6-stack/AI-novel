@@ -1,0 +1,17 @@
+# 小説アプリ（app）だけを動かす。HTTPS 化は既存の Caddy / Tailscale Serve に任せる
+# （デザイン仕様 §8.2：Caddy を新しく立てない）
+services:
+  app:
+    build: .
+    image: novel-studio:latest
+    container_name: novel-studio
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    ports:
+      # 127.0.0.1 だけで待ち受ける。Docker のポート公開はファイアウォール（ufw）を素通りするため
+      - "127.0.0.1:${NOVEL_PORT:-3100}:3100"
+    volumes:
+      # SQLite（app.sqlite）・画像（images/）・暗号鍵（secret.key）をホスト側に残す
+      - ./data:/data
