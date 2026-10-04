@@ -236,6 +236,26 @@ async function main() {
   );
   await snap(page, 'write-ep2');
 
+  console.log('前回までの要約を編集（長い文章でもシートに収まり、欄の中でスクロールできる）');
+  await page.getByRole('button', { name: '編集' }).click();
+  const summarySheet = page.getByRole('dialog', { name: /前回までの要約/ });
+  const editor = summarySheet.getByRole('textbox', { name: '前回までの要約' });
+  const longText = Array.from({ length: 80 }, (_, i) => `- ${i + 1}行目：とても長い要約のテスト。`).join('\n');
+  await editor.fill(longText);
+  await page.waitForTimeout(350);
+  const vh2 = page.viewportSize().height;
+  const sheetBox = await summarySheet.boundingBox();
+  assert(sheetBox && sheetBox.y >= 0 && Math.abs(sheetBox.y + sheetBox.height - vh2) < 2, 'シートが画面内に収まる');
+  const applyBox = await summarySheet.getByRole('button', { name: '反映' }).boundingBox();
+  assert(applyBox && applyBox.y + applyBox.height <= vh2, '「反映」ボタンが画面内に見える');
+  const scrolled = await editor.evaluate((el) => {
+    el.scrollTop = 100000;
+    return { top: el.scrollTop, overflow: getComputedStyle(el).overflowY, fits: el.scrollHeight > el.clientHeight };
+  });
+  assert(scrolled.fits && scrolled.top > 0 && scrolled.overflow === 'auto', `欄の中でスクロールできる（${JSON.stringify(scrolled)}）`);
+  await snap(page, 'summary-edit-long');
+  await summarySheet.getByRole('button', { name: '閉じる' }).click();
+
   console.log('Library');
   await page.getByRole('link', { name: 'Library' }).click();
   await page.getByRole('heading', { name: 'Library' }).waitFor();
@@ -270,6 +290,12 @@ async function main() {
   const vh = page.viewportSize().height;
   assert(box && box.height > vh * 0.6, `一覧の多いシートは画面の大部分を使う（高さ ${box?.height}）`);
   assert(box && Math.abs(box.y + box.height - vh) < 2, `シートは画面の下端に付く（y=${box?.y} h=${box?.height} vh=${vh}）`);
+  const listScroll = await sheet.evaluate((d) => {
+    d.scrollTop = 600;
+    return d.scrollTop;
+  });
+  assert(listScroll > 0, 'モデル一覧のシートはスクロールできる');
+  await sheet.evaluate((d) => (d.scrollTop = 0));
   await snap(page, 'settings-model-sheet');
   await sheet.getByRole('button', { name: 'mock/think' }).click();
   await page.getByText('mock/think').first().waitFor();

@@ -5,8 +5,15 @@ import { useEffect, useId, useRef, type PointerEvent, type ReactNode } from 'rea
 import { cx } from './ui';
 
 /**
+ * シートの中のテキストエリアを、見出し・説明1段落・下のボタンと一緒にシートへ収まる高さで止めるための値。
+ * これより長い文章はテキストエリアの中でスクロールする（TextArea の maxHeight に渡す）。
+ */
+export const SHEET_TEXTAREA_MAX_HEIGHT = 'calc(var(--sheet-height) - 230px - var(--sheet-safe))';
+
+/**
  * ボトムシート（デザイン仕様 §4.7）。
  * ネイティブの <dialog> を使い、暗幕のタップ・×・Esc・下スワイプで閉じる。
+ * 中身が長いときは dialog 自身がスクロールし、見出しと下のボタンは固定したままにする。
  */
 export function Sheet({
   open,
@@ -30,7 +37,10 @@ export function Sheet({
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal();
+    if (open && !d.open) {
+      d.showModal();
+      d.scrollTop = 0;
+    }
     if (!open && d.open) d.close();
   }, [open]);
 
@@ -40,6 +50,43 @@ export function Sheet({
       if (d?.open) d.close();
     };
   }, []);
+
+  // キーボードが出たら、画面の見えている範囲（visualViewport）の中にシートを収める。
+  // iOS ではキーボードが出てもページの高さが変わらず、下に付けたシートがキーボードの裏に隠れるため。
+  useEffect(() => {
+    const d = ref.current;
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!open || !d || !vv) return;
+    let frame = 0;
+    const apply = () => {
+      const covered = Math.max(0, Math.round(window.innerHeight - (vv.offsetTop + vv.height)));
+      if (covered > 40) {
+        d.style.setProperty('--sheet-bottom', `${covered}px`);
+        d.style.setProperty('--sheet-max', `${Math.max(200, Math.round(vv.height - 8))}px`);
+        // キーボードの上ではホームインジケーター分の余白は要らない
+        d.style.setProperty('--sheet-safe-bottom', '0px');
+      } else {
+        d.style.removeProperty('--sheet-bottom');
+        d.style.removeProperty('--sheet-max');
+        d.style.removeProperty('--sheet-safe-bottom');
+      }
+    };
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(apply);
+    };
+    apply();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      cancelAnimationFrame(frame);
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      d.style.removeProperty('--sheet-bottom');
+      d.style.removeProperty('--sheet-max');
+      d.style.removeProperty('--sheet-safe-bottom');
+    };
+  }, [open]);
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -74,13 +121,14 @@ export function Sheet({
       }}
     >
       <div
-        className="flex-none touch-none select-none"
+        className="sticky top-0 z-10 touch-none select-none bg-bg"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        <div className="mx-auto mt-2 h-[5px] w-10 rounded-full bg-line-strong" aria-hidden />
+        <div className="h-2" aria-hidden />
+        <div className="mx-auto h-[5px] w-10 rounded-full bg-line-strong" aria-hidden />
         <div className="flex items-center gap-3 px-4 pb-2 pt-2">
           <h2 id={titleId} className="min-w-0 flex-1 truncate text-[17px] font-bold">
             {title}
@@ -95,23 +143,9 @@ export function Sheet({
           </button>
         </div>
       </div>
-      {/*
-        flex-1（flex-basis: 0%）にすると、iOS の Safari では高さが中身に合わせて決まる dialog の中で
-        本文の高さが 0 として計算され、見出ししか表示されない。flex-auto で中身の高さを基準にする
-      */}
-      <div
-        className={cx(
-          'min-h-0 flex-auto overflow-y-auto overscroll-contain px-4',
-          // 下のボタンが無いシートは、iPhone のホームインジケーターに中身が隠れないよう余白を取る
-          footer ? 'pb-4' : 'pb-[calc(16px+env(safe-area-inset-bottom))]',
-        )}
-      >
-        {open && children}
-      </div>
+      <div className={cx('px-4', footer ? 'pb-4' : 'sheet-end')}>{open && children}</div>
       {footer && open && (
-        <div className="flex-none border-t border-line px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3">
-          {footer}
-        </div>
+        <div className="sheet-footer sticky bottom-0 z-10 border-t border-line bg-bg px-4 pt-3">{footer}</div>
       )}
     </dialog>
   );

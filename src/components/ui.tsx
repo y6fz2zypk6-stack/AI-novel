@@ -190,11 +190,12 @@ export function TextArea({
   maxHeight,
   strong = false,
   value,
+  style,
   ...props
 }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
   minHeight?: number;
-  /** これ以上は伸ばさず、欄の中でスクロールさせる */
-  maxHeight?: number;
+  /** これ以上は伸ばさず、欄の中でスクロールさせる（px の数値、または CSS の値） */
+  maxHeight?: number | string;
   strong?: boolean;
   value: string;
 }) {
@@ -203,10 +204,9 @@ export function TextArea({
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    const wanted = Math.max(minHeight, el.scrollHeight + 2);
-    el.style.height = `${maxHeight ? Math.min(wanted, maxHeight) : wanted}px`;
-    el.style.overflowY = maxHeight && wanted > maxHeight ? 'auto' : 'hidden';
-  }, [minHeight, maxHeight]);
+    // 上限（maxHeight）は CSS の max-height が効く。超えた分は欄の中でスクロールする
+    el.style.height = `${Math.max(minHeight, el.scrollHeight + 2)}px`;
+  }, [minHeight]);
   useLayoutEffect(resize, [value, resize]);
   return (
     <textarea
@@ -214,11 +214,12 @@ export function TextArea({
       value={value}
       className={cx(
         'block w-full resize-none rounded-field border p-3 text-[16px] leading-[1.7] text-ink placeholder:text-ink-muted/70',
+        maxHeight === undefined ? 'overflow-y-hidden' : 'overflow-y-auto',
         strong ? 'border-line-strong bg-bg' : 'border-line bg-surface',
         FOCUS,
         className,
       )}
-      style={{ minHeight }}
+      style={{ minHeight, maxHeight, ...style }}
       {...props}
     />
   );

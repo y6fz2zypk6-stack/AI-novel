@@ -146,24 +146,45 @@ body:not(:has(#tabbar)) #dock {
 
 /* ---- ボトムシート ---- */
 
+/*
+ * シートは dialog 自身をスクロールさせる（見出しと下のボタンは sticky で固定）。
+ * flexbox で中身の高さを割り振る作りは、iOS の Safari で高さが 0 になったり
+ * スクロールできなくなったりしたため使わない。
+ *
+ * --sheet-bottom / --sheet-max / --sheet-safe-bottom は、キーボードが出ている間だけ
+ * Sheet.tsx が visualViewport に合わせて設定する（シートを見えている範囲に収める）。
+ */
 dialog.sheet {
+  --sheet-height: min(88dvh, var(--sheet-max, 88dvh));
+  --sheet-safe: var(--sheet-safe-bottom, env(safe-area-inset-bottom));
   margin: auto auto 0;
+  bottom: var(--sheet-bottom, 0px);
   padding: 0;
   border: 0;
   width: 100%;
   max-width: 640px;
-  max-height: 88dvh;
+  max-height: var(--sheet-height);
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   background: var(--color-bg);
   color: var(--color-ink);
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 dialog.sheet[open] {
-  display: flex;
-  flex-direction: column;
+  display: block;
   animation: sheet-up 0.22s ease-out;
+}
+
+/* 下にボタンが無いシートの最後の余白（ホームインジケーターに隠れないように） */
+.sheet-end {
+  padding-bottom: calc(16px + var(--sheet-safe));
+}
+
+.sheet-footer {
+  padding-bottom: calc(12px + var(--sheet-safe));
 }
 
 dialog.sheet::backdrop {

@@ -10,7 +10,7 @@ import type { ModelChoice, ProviderView } from '@/lib/types';
 import { ContextSheet } from './ContextSheet';
 import { Dock, Header, Main, Page } from './chrome';
 import { ModelSheet } from './ModelSheet';
-import { Sheet } from './Sheet';
+import { SHEET_TEXTAREA_MAX_HEIGHT, Sheet } from './Sheet';
 import {
   Button,
   Card,
@@ -520,7 +520,8 @@ export function WriteScreen(props: WriteProps) {
           aria-label="前回までの要約"
           value={summaryEdit}
           onChange={(e) => setSummaryEdit(e.target.value)}
-          minHeight={280}
+          minHeight={160}
+          maxHeight={SHEET_TEXTAREA_MAX_HEIGHT}
           strong
         />
       </Sheet>
