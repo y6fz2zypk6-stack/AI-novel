@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { ChevronDown, History, PenLine, Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errorMessage, formatNumber, shortModel } from '@/lib/client';
+import { episodeTitle } from '@/lib/episodes';
 import { buildContext } from '@/lib/prompt';
-import type { ModelChoice, ProviderView } from '@/lib/types';
+import type { EpisodeKind, ModelChoice, ProviderView } from '@/lib/types';
 import { ContextSheet } from './ContextSheet';
 import { Dock, Header, Main, Page } from './chrome';
 import { ModelSheet } from './ModelSheet';
@@ -30,6 +31,7 @@ export type WriteProps = {
   world: { id: string; name: string; baseInstruction: string };
   episode: {
     id: string;
+    kind: EpisodeKind;
     episodeNumber: number;
     title: string;
     instruction: string;
@@ -42,6 +44,7 @@ export type WriteProps = {
   };
   characters: { id: string; name: string; content: string }[];
   lore: { id: string; title: string; content: string }[];
+  /** 「前回までの要約」の出どころ（本編は1つ前の話、番外編は土台にした本編の話） */
   prevEpisode: { number: number; summary: string } | null;
   generationCount: number;
   runningGenerationId: string | null;
@@ -175,6 +178,9 @@ function toggle(list: string[], id: string): string[] {
 export function WriteScreen(props: WriteProps) {
   const { world, episode, characters, lore, prevEpisode, providers, writingDefault } = props;
   const router = useRouter();
+  const side = episode.kind === 'side';
+  const name = episodeTitle(episode.kind, episode.episodeNumber);
+  const prevLabel = side ? '本編の要約' : '前回までの要約';
 
   const [title, setTitle] = useState(episode.title);
   const [instruction, setInstruction] = useState(episode.instruction);
@@ -211,11 +217,23 @@ export function WriteScreen(props: WriteProps) {
         characters: characters.filter((c) => characterIds.includes(c.id)),
         lore: lore.filter((l) => loreIds.includes(l.id)),
         previousSummary,
+        episodeKind: episode.kind,
         episodeNumber: episode.episodeNumber,
         episodeTitle: title,
         episodeInstruction: instruction,
       }),
-    [world.baseInstruction, characters, lore, characterIds, loreIds, previousSummary, episode.episodeNumber, title, instruction],
+    [
+      world.baseInstruction,
+      characters,
+      lore,
+      characterIds,
+      loreIds,
+      previousSummary,
+      episode.kind,
+      episode.episodeNumber,
+      title,
+      instruction,
+    ],
   );
 
   async function generate() {
@@ -232,10 +250,10 @@ export function WriteScreen(props: WriteProps) {
   }
 
   async function removeEpisode() {
-    if (!confirm(`Episode ${episode.episodeNumber} を削除しますか？\n候補・要約・スチルも削除され、元に戻せません。`)) return;
+    if (!confirm(`${name} を削除しますか？\n候補・要約・スチルも削除され、元に戻せません。`)) return;
     try {
       await api(`/api/episodes/${episode.id}`, { method: 'DELETE' });
-      router.push(`/w/${world.id}/write`);
+      router.push(side ? `/w/${world.id}/library?tab=episodes` : `/w/${world.id}/write`);
       router.refresh();
     } catch (err) {
       setError(errorMessage(err));
@@ -255,7 +273,7 @@ export function WriteScreen(props: WriteProps) {
     <Page>
       <Header
         world={world}
-        title={`Episode ${episode.episodeNumber}`}
+        title={name}
         right={
           props.generationCount > 0 ? (
             <IconLink
@@ -268,6 +286,11 @@ export function WriteScreen(props: WriteProps) {
         }
       />
       <Main className="flex flex-col gap-[22px]">
+        {side && (
+          <p className="rounded-[14px] bg-surface px-3.5 py-3 text-[13px] leading-[1.6] text-ink-sub">
+            番外編です。本編の続きとしては扱われず、要約も本編へ引き継がれません。
+          </p>
+        )}
         {props.runningGenerationId && (
           <div className="flex items-center justify-between gap-3 rounded-[14px] border border-accent-banner-line bg-accent-banner px-3.5 py-3 text-[14px] text-accent-ink">
             <span>生成中の候補があります</span>
@@ -397,7 +420,8 @@ export function WriteScreen(props: WriteProps) {
           <Card className="py-3.5">
             <div className="flex items-center justify-between gap-3">
               <h2 id="sec-prev" className="text-[15px] font-bold">
-                前回までの要約{prevEpisode && <span className="font-normal text-ink-muted"> · Ep.{prevEpisode.number}</span>}
+                {prevLabel}
+                {prevEpisode && <span className="font-normal text-ink-muted"> · Ep.{prevEpisode.number}</span>}
               </h2>
               <button
                 type="button"
@@ -411,8 +435,23 @@ export function WriteScreen(props: WriteProps) {
               </button>
             </div>
             <p className={cx('line-clamp-2 text-[14px] leading-[1.6]', previousSummary.trim() ? 'text-ink-sub' : 'text-ink-muted')}>
-              {plainPreview(previousSummary) || (prevEpisode ? '前の話の要約が保存されていません' : 'なし（最初の話）')}
+              {plainPreview(previousSummary) ||
+                (prevEpisode
+                  ? side
+                    ? '本編の要約が保存されていません'
+                    : '前の話の要約が保存されていません'
+                  : side
+                    ? 'なし'
+                    : 'なし（最初の話）')}
             </p>
+            {!previousSummary.trim() && prevEpisode?.summary.trim() && (
+              <div className="mt-2 flex items-center justify-between gap-3 border-t border-line pt-2.5">
+                <span className="text-[13px] text-ink-muted">Ep.{prevEpisode.number} の要約が保存されています</span>
+                <Button variant="secondary" size="sm" onClick={() => setPreviousSummary(prevEpisode.summary)}>
+                  反映
+                </Button>
+              </div>
+            )}
           </Card>
         </section>
 
@@ -491,7 +530,7 @@ export function WriteScreen(props: WriteProps) {
       <Sheet
         open={sheet === 'summary'}
         onClose={() => setSheet(null)}
-        title={prevEpisode ? `前回までの要約 · Ep.${prevEpisode.number}` : '前回までの要約'}
+        title={prevEpisode ? `${prevLabel} · Ep.${prevEpisode.number}` : prevLabel}
         footer={
           <div className="flex gap-2.5">
             {prevEpisode && prevEpisode.summary !== summaryEdit && (
@@ -514,10 +553,12 @@ export function WriteScreen(props: WriteProps) {
         }
       >
         <p className="mb-2 text-[12px] leading-[1.6] text-ink-muted">
-          このエピソードの生成にだけ使います。前の話の要約そのものは変わりません。
+          {side
+            ? 'この番外編の生成にだけ使います。本編の要約そのものは変わりません。'
+            : 'このエピソードの生成にだけ使います。前の話の要約そのものは変わりません。'}
         </p>
         <TextArea
-          aria-label="前回までの要約"
+          aria-label={prevLabel}
           value={summaryEdit}
           onChange={(e) => setSummaryEdit(e.target.value)}
           minHeight={160}

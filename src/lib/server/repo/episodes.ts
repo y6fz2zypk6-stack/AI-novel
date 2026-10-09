@@ -5,9 +5,11 @@ import {
   episodeCharacters,
   episodeLore,
   episodes,
+  generations,
   lore,
   type EpisodeRow,
 } from '@/lib/db/schema';
+import type { EpisodeKind } from '@/lib/types';
 import { getDb } from '../db';
 import { newId } from '../ids';
 import { touchWorld } from './worlds';
@@ -52,41 +54,82 @@ export function listEpisodes(worldId: string): EpisodeListItem[] {
     })
     .from(episodes)
     .where(eq(episodes.worldId, worldId))
-    .orderBy(desc(episodes.episodeNumber))
+    // 本編（main）を先に、それぞれ新しい順
+    .orderBy(asc(episodes.kind), desc(episodes.episodeNumber))
     .all()
     .map((r) => ({ ...r.episode, generationCount: r.generationCount, imageCount: r.imageCount }));
 }
 
-/** 指定した番号より前で、いちばん新しい Episode */
-export function previousEpisode(worldId: string, episodeNumber: number): EpisodeRow | undefined {
+/** 本編のうち、指定した番号より前でいちばん新しい話 */
+export function previousMainEpisode(worldId: string, episodeNumber: number): EpisodeRow | undefined {
   return getDb()
     .select()
     .from(episodes)
-    .where(and(eq(episodes.worldId, worldId), lt(episodes.episodeNumber, episodeNumber)))
+    .where(and(eq(episodes.worldId, worldId), eq(episodes.kind, 'main'), lt(episodes.episodeNumber, episodeNumber)))
+    .orderBy(desc(episodes.episodeNumber))
+    .limit(1)
+    .get();
+}
+
+/** 本編の最新話 */
+export function latestMainEpisode(worldId: string): EpisodeRow | undefined {
+  return getDb()
+    .select()
+    .from(episodes)
+    .where(and(eq(episodes.worldId, worldId), eq(episodes.kind, 'main')))
+    .orderBy(desc(episodes.episodeNumber))
+    .limit(1)
+    .get();
+}
+
+/** 要約を保存してある本編の話のうち、いちばん新しいもの（番外編の土台にする） */
+export function latestSummarizedMainEpisode(worldId: string): EpisodeRow | undefined {
+  return getDb()
+    .select()
+    .from(episodes)
+    .where(and(eq(episodes.worldId, worldId), eq(episodes.kind, 'main'), sql`trim(${episodes.summary}) <> ''`))
     .orderBy(desc(episodes.episodeNumber))
     .limit(1)
     .get();
 }
 
 /**
- * 次の Episode を作る。前の Episode の保存済み要約を「前回までの要約」に入れ、
- * 人物・ロアの選択も引き継ぐ。
+ * 新しい話を作る。
+ * - 本編：本編の最新話の保存済み要約を「前回までの要約」に入れ、人物・ロアの選択も引き継ぐ。
+ * - 番外編：baseEpisodeId の本編の話（省略時は要約を保存してある本編の最新話、それも無ければ本編の最新話）を
+ *   土台にする。番号は本編とは別に振り、番外編の要約は本編へ引き継がない。
  */
-export function createEpisode(worldId: string): EpisodeRow {
+export function createEpisode(
+  worldId: string,
+  kind: EpisodeKind = 'main',
+  opts: { baseEpisodeId?: string | null } = {},
+): EpisodeRow {
   const db = getDb();
   return db.transaction((tx) => {
-    const prev = tx
-      .select()
+    // better-sqlite3 は同じ接続で動くので、ここで呼ぶ関数の読み取りもこのトランザクションに含まれる
+    let prev: EpisodeRow | undefined;
+    if (kind === 'main') {
+      prev = latestMainEpisode(worldId);
+    } else if (opts.baseEpisodeId) {
+      prev = tx.select().from(episodes).where(eq(episodes.id, opts.baseEpisodeId)).get();
+      if (!prev || prev.worldId !== worldId || prev.kind !== 'main') {
+        throw new Error('番外編の土台にする本編の話が見つかりません');
+      }
+    } else {
+      prev = latestSummarizedMainEpisode(worldId) ?? latestMainEpisode(worldId);
+    }
+    const lastOfKind = tx
+      .select({ n: sql<number | null>`max(${episodes.episodeNumber})` })
       .from(episodes)
-      .where(eq(episodes.worldId, worldId))
-      .orderBy(desc(episodes.episodeNumber))
-      .limit(1)
+      .where(and(eq(episodes.worldId, worldId), eq(episodes.kind, kind)))
       .get();
     const now = Date.now();
     const row: EpisodeRow = {
       id: newId(),
       worldId,
-      episodeNumber: (prev?.episodeNumber ?? 0) + 1,
+      kind,
+      episodeNumber: (lastOfKind?.n ?? 0) + 1,
+      baseEpisodeId: kind === 'side' ? (prev?.id ?? null) : null,
       title: '',
       instruction: '',
       previousSummary: prev?.summary ?? '',
@@ -222,15 +265,61 @@ export function deleteEpisode(id: string): void {
   getDb().delete(episodes).where(eq(episodes.id, id)).run();
 }
 
-/** 次の番号の Episode（あれば） */
-export function nextEpisode(worldId: string, episodeNumber: number): EpisodeRow | undefined {
+/** 本編で次の番号の話（あれば） */
+export function nextMainEpisode(worldId: string, episodeNumber: number): EpisodeRow | undefined {
   return getDb()
     .select()
     .from(episodes)
-    .where(and(eq(episodes.worldId, worldId), sql`${episodes.episodeNumber} > ${episodeNumber}`))
+    .where(
+      and(eq(episodes.worldId, worldId), eq(episodes.kind, 'main'), sql`${episodes.episodeNumber} > ${episodeNumber}`),
+    )
     .orderBy(asc(episodes.episodeNumber))
     .limit(1)
     .get();
+}
+
+export type AdoptedText = {
+  id: string;
+  episodeNumber: number;
+  /** 番外編の土台にした本編の話の番号 */
+  baseNumber: number | null;
+  title: string;
+  generationId: string;
+  content: string;
+  edited: boolean;
+};
+
+/** 採用した本文を番号順に（通して読む画面用）。採用していない話は含めない */
+export function listAdoptedTexts(worldId: string, kind: EpisodeKind): AdoptedText[] {
+  return getDb()
+    .select({
+      id: episodes.id,
+      episodeNumber: episodes.episodeNumber,
+      baseNumber: sql<number | null>`(select b.episode_number from episodes b where b.id = "episodes"."base_episode_id")`,
+      title: episodes.title,
+      generationId: generations.id,
+      content: generations.content,
+      editedAt: generations.editedAt,
+    })
+    .from(episodes)
+    .innerJoin(generations, eq(generations.id, episodes.acceptedGenerationId))
+    .where(and(eq(episodes.worldId, worldId), eq(episodes.kind, kind)))
+    .orderBy(asc(episodes.episodeNumber))
+    .all()
+    .map(({ editedAt, ...r }) => ({ ...r, edited: editedAt !== null }));
+}
+
+/** 採用済みの話の数（本編・番外編それぞれ） */
+export function countAdopted(worldId: string): Record<EpisodeKind, number> {
+  const rows = getDb()
+    .select({ kind: episodes.kind, n: sql<number>`count(*)` })
+    .from(episodes)
+    .where(and(eq(episodes.worldId, worldId), sql`${episodes.acceptedGenerationId} is not null`))
+    .groupBy(episodes.kind)
+    .all();
+  const out: Record<EpisodeKind, number> = { main: 0, side: 0 };
+  for (const r of rows) out[r.kind] = r.n;
+  return out;
 }
 
 export function clearSummaryDraft(id: string): void {

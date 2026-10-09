@@ -2,6 +2,9 @@
 
 export type ProviderType = 'openrouter' | 'openai-compatible';
 
+/** 'main' = 本編 / 'side' = 番外編 */
+export type EpisodeKind = 'main' | 'side';
+
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -30,6 +33,8 @@ export type PromptSnapshot = {
   characters: { id: string; name: string; content: string }[];
   lore: { id: string; title: string; content: string }[];
   previousSummary: string;
+  /** 古い Snapshot には無い（本編として扱う） */
+  episodeKind?: EpisodeKind;
   episodeNumber: number;
   episodeTitle: string;
   episodeInstruction: string;
@@ -48,6 +53,8 @@ export type GenerationView = {
   provider: string;
   model: string;
   content: string;
+  /** 手で直してあるか（AI の原文に戻せる） */
+  edited: boolean;
   status: GenerationStatus;
   error: string | null;
   finishReason: string | null;

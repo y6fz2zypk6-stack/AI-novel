@@ -2,10 +2,16 @@ import { notFound, redirect } from 'next/navigation';
 import { WriteScreen } from '@/components/WriteScreen';
 import { runningGenerationFor } from '@/lib/server/jobs';
 import { defaultChoice } from '@/lib/server/models';
-import { createEpisode, getEpisode, previousEpisode } from '@/lib/server/repo/episodes';
+import {
+  createEpisode,
+  getEpisode,
+  latestMainEpisode,
+  latestSummarizedMainEpisode,
+  previousMainEpisode,
+} from '@/lib/server/repo/episodes';
 import { countGenerations } from '@/lib/server/repo/generations';
 import { listProviders, toProviderView } from '@/lib/server/repo/providers';
-import { getWorld, latestEpisodeId, listCharacters, listLore } from '@/lib/server/repo/worlds';
+import { getWorld, listCharacters, listLore } from '@/lib/server/repo/worlds';
 
 export const metadata = { title: 'Write' };
 
@@ -16,7 +22,7 @@ type Props = {
 
 /**
  * Write — 生成前の画面。
- * ?ep= が無いとき（Write タブ）は最新の話を開く。最新の話に候補が既にあれば、
+ * ?ep= が無いとき（Write タブ）は本編の最新話を開く。最新話に候補が既にあれば、
  * 続きから再開できるよう候補確認・採用後の画面へ移る。
  */
 export default async function WritePage({ params, searchParams }: Props) {
@@ -27,20 +33,27 @@ export default async function WritePage({ params, searchParams }: Props) {
 
   let episodeId = ep;
   if (!episodeId) {
-    const latest = latestEpisodeId(worldId) ?? createEpisode(worldId).id;
+    const latest = latestMainEpisode(worldId)?.id ?? createEpisode(worldId).id;
     if (countGenerations(latest) > 0) redirect(`/w/${worldId}/episodes/${latest}`);
     episodeId = latest;
   }
   const episode = getEpisode(episodeId);
   if (!episode || episode.worldId !== worldId) notFound();
 
-  const prev = previousEpisode(worldId, episode.episodeNumber);
+  // 「前回までの要約」の出どころ。本編は1つ前の話、番外編は土台にした本編の話
+  const prev =
+    episode.kind === 'side'
+      ? episode.baseEpisodeId
+        ? getEpisode(episode.baseEpisodeId)
+        : latestSummarizedMainEpisode(worldId)
+      : previousMainEpisode(worldId, episode.episodeNumber);
   return (
     <WriteScreen
       key={episode.id}
       world={{ id: world.id, name: world.name, baseInstruction: world.baseInstruction }}
       episode={{
         id: episode.id,
+        kind: episode.kind,
         episodeNumber: episode.episodeNumber,
         title: episode.title,
         instruction: episode.instruction,

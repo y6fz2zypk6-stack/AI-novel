@@ -98,6 +98,8 @@ async function main() {
     timezoneId: 'Asia/Tokyo',
   });
   const page = await context.newPage();
+  // 確認ダイアログ（confirm）は「OK」で進める
+  page.on('dialog', (d) => void d.accept());
   const consoleErrors = [];
   page.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()));
   page.on('pageerror', (e) => consoleErrors.push(String(e)));
@@ -193,13 +195,42 @@ async function main() {
   await snap(page, 'snapshot');
   await page.getByRole('dialog').getByRole('button', { name: '閉じる' }).click();
 
-  console.log('候補 2 を採用');
+  console.log('手で直す → AIの原文に戻す（候補 3）');
+  await page.getByRole('button', { name: '手で直す' }).click();
+  let editSheet = page.getByRole('dialog', { name: '候補 3 を手で直す' });
+  let bodyBox = editSheet.getByRole('textbox', { name: '本文' });
+  assert((await bodyBox.inputValue()).startsWith('（修正版）'), '今の本文から編集を始める');
+  await bodyBox.fill('一度だけ直した本文。');
+  await editSheet.getByRole('button', { name: '保存' }).click();
+  await page.getByText('手修正済み').waitFor();
+  assert((await page.locator('.prose-jp').textContent()).includes('一度だけ直した本文。'), '直した本文を表示');
+  await page.getByRole('button', { name: '手で直す' }).click();
+  editSheet = page.getByRole('dialog', { name: '候補 3 を手で直す' });
+  await editSheet.getByRole('button', { name: 'AIの原文に戻す' }).click();
+  await page.getByText('手修正済み').waitFor({ state: 'detached' });
+  assert((await page.locator('.prose-jp').textContent()).includes('（修正版）'), 'AI の原文に戻る');
+
+  console.log('候補 2 を手で直して採用（要約は自動で作らない）');
   await page.getByRole('button', { name: '前の候補' }).click();
   await page.getByText('候補 2 / 3').waitFor();
+  await page.getByRole('button', { name: '手で直す' }).click();
+  editSheet = page.getByRole('dialog', { name: '候補 2 を手で直す' });
+  bodyBox = editSheet.getByRole('textbox', { name: '本文' });
+  await bodyBox.fill(`【手直し】${await bodyBox.inputValue()}`);
+  await snap(page, 'edit-sheet');
+  await editSheet.getByRole('button', { name: '保存' }).click();
+  await page.getByText('手修正済み').waitFor();
+  await snap(page, 'candidate-2-edited');
   await page.getByRole('button', { name: 'この本文を採用' }).click();
   await page.getByText('候補 2 を採用しました').waitFor();
-  await snap(page, 'adopted-summarizing');
+  assert(await page.getByText('・手修正済み').isVisible(), '採用した本文が手修正済みと分かる');
+  await page.getByText('未作成').waitFor();
+  await page.waitForTimeout(1500);
+  assert(await page.getByText('未作成').isVisible(), '採用しただけでは要約を作らない');
+  await snap(page, 'adopted-no-summary');
+  await page.getByRole('button', { name: '要約を生成' }).click();
   await page.getByText('未保存・AI生成').waitFor({ timeout: 20_000 });
+  await page.getByRole('button', { name: '要約を再生成' }).waitFor();
   await snap(page, 'adopted-summary');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('保存済み').waitFor();
@@ -225,6 +256,28 @@ async function main() {
   await page.getByRole('dialog').getByText('Prompt', { exact: true }).waitFor();
   await snap(page, 'still-viewer');
   await page.getByRole('dialog').getByRole('button', { name: '閉じる' }).click();
+
+  console.log('番外編（Ep.1 の時点から）');
+  await page.getByRole('button', { name: '番外編' }).click();
+  await page.getByRole('heading', { name: '番外編 1' }).waitFor();
+  await page.getByText('番外編です。').waitFor();
+  assert((await page.locator('#sec-prev').textContent()).includes('本編の要約 · Ep.1'), '本編の要約を受け取る');
+  await page.getByLabel('タイトル').fill('夏祭りの夜');
+  await page.getByLabel('今回の指示').fill('本編とは関係なく、ミナとレンが夏祭りに行く。');
+  await page.getByText('下書きを保存しました').waitFor({ timeout: 10_000 });
+  await page.getByLabel('今回の指示').blur();
+  await snap(page, 'write-side');
+  await page.getByRole('button', { name: '本文を生成' }).click();
+  await page.waitForURL(/\/episodes\//);
+  await page.getByRole('heading', { name: '番外編 1' }).waitFor();
+  await page.getByRole('button', { name: 'この本文を採用' }).waitFor();
+  await page.waitForFunction(() => !document.body.textContent.includes('生成中…'), null, { timeout: 30_000 });
+  await page.getByRole('button', { name: 'この本文を採用' }).click();
+  await page.getByText('候補 1 を採用しました').waitFor();
+  await page.getByRole('heading', { name: '要約（任意）' }).waitFor();
+  await snap(page, 'adopted-side');
+  await page.getByRole('link', { name: '本編に戻る' }).click();
+  await page.getByText('候補 2 を採用しました').waitFor();
 
   console.log('次のエピソードへ');
   await page.getByRole('button', { name: '次のエピソードへ' }).click();
@@ -270,6 +323,40 @@ async function main() {
     await page.waitForTimeout(300);
     await snap(page, name);
   }
+
+  console.log('Library — 話の追加（本編の続き / 番外編）');
+  await page.getByRole('tab', { name: '話' }).click();
+  await page.getByRole('heading', { name: '番外編' }).waitFor();
+  await page.getByRole('button', { name: '追加' }).click();
+  const addSheet = page.getByRole('dialog', { name: '話を追加' });
+  await addSheet.getByRole('button', { name: /本編の続き（Episode 3）/ }).waitFor();
+  await addSheet.getByRole('button', { name: /番外編（番外編 2）/ }).waitFor();
+  await snap(page, 'library-add-episode');
+  await addSheet.getByRole('button', { name: '閉じる' }).click();
+
+  console.log('通して読む');
+  await page.getByRole('link', { name: '採用した本文を通して読む' }).click();
+  await page.getByRole('heading', { name: '通して読む' }).waitFor();
+  await page.getByRole('heading', { name: '雨の屋上' }).waitFor();
+  assert((await page.locator('article').count()) === 1, '採用した本文だけを並べる（Ep.2 は未採用）');
+  assert((await page.locator('article .prose-jp').textContent()).startsWith('【手直し】'), '手で直した本文を読む');
+  await snap(page, 'reader');
+  await page.getByRole('button', { name: '目次' }).click();
+  await page.getByRole('dialog', { name: '目次' }).getByRole('button', { name: /雨の屋上/ }).waitFor();
+  await snap(page, 'reader-toc');
+  await page.getByRole('dialog', { name: '目次' }).getByRole('button', { name: /雨の屋上/ }).click();
+  await page.getByRole('dialog', { name: '目次' }).waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: '手で直す' }).click();
+  editSheet = page.getByRole('dialog', { name: '第1話を手で直す' });
+  bodyBox = editSheet.getByRole('textbox', { name: '本文' });
+  await bodyBox.fill(`${await bodyBox.inputValue()}\n読みながら直した一文。`);
+  await editSheet.getByRole('button', { name: '保存' }).click();
+  await page.getByText('読みながら直した一文。').waitFor();
+  await page.getByRole('tab', { name: /番外編/ }).click();
+  await page.waitForURL(/kind=side/);
+  await page.getByRole('heading', { name: '夏祭りの夜' }).waitFor();
+  assert(await page.getByText('Ep.1 時点').isVisible(), '番外編の土台を表示');
+  await snap(page, 'reader-side');
 
   console.log('Write タブ（最新の Ep.2 の入力画面へ）');
   await page.getByRole('link', { name: 'Write' }).click();

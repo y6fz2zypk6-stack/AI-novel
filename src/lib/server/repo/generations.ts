@@ -14,6 +14,7 @@ export function toGenerationView(row: GenerationRow): GenerationView {
     provider: row.provider,
     model: row.model,
     content: row.content,
+    edited: row.editedAt !== null,
     status: row.status,
     error: row.error,
     finishReason: row.finishReason,
@@ -49,4 +50,35 @@ export function updateGeneration(
 
 export function countGenerations(episodeId: string): number {
   return getDb().select({ n: count() }).from(generations).where(eq(generations.episodeId, episodeId)).get()?.n ?? 0;
+}
+
+/**
+ * 本文を手で直す。最初に直したときだけ AI の原文を残す（何度直しても原文は最初のまま）。
+ * 原文と同じ内容に戻した場合は、手修正なしの状態に戻す。
+ */
+export function editGenerationContent(id: string, content: string): GenerationRow | undefined {
+  const row = getGeneration(id);
+  if (!row) return undefined;
+  const original = row.originalContent ?? row.content;
+  if (content === original) return revertGenerationContent(id);
+  getDb()
+    .update(generations)
+    .set({ content, originalContent: original, editedAt: Date.now() })
+    .where(eq(generations.id, id))
+    .run();
+  return getGeneration(id);
+}
+
+/** 手で直す前の AI の原文に戻す */
+export function revertGenerationContent(id: string): GenerationRow | undefined {
+  const row = getGeneration(id);
+  if (!row) return undefined;
+  if (row.originalContent !== null) {
+    getDb()
+      .update(generations)
+      .set({ content: row.originalContent, originalContent: null, editedAt: null })
+      .where(eq(generations.id, id))
+      .run();
+  }
+  return getGeneration(id);
 }

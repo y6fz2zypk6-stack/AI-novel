@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { LibraryScreen, type LibraryTab } from '@/components/LibraryScreen';
-import { listEpisodes } from '@/lib/server/repo/episodes';
+import { countAdopted, listEpisodes } from '@/lib/server/repo/episodes';
 import { listWorldImages, toImageView } from '@/lib/server/repo/images';
 import { getWorld, listCharacters, listLore } from '@/lib/server/repo/worlds';
 import { countChars } from '@/lib/tokens';
@@ -22,6 +22,8 @@ export default async function LibraryPage({ params, searchParams }: Props) {
   const tab = TABS.includes(rawTab as LibraryTab) ? (rawTab as LibraryTab) : 'characters';
 
   const excerpt = (text: string) => text.slice(0, 200);
+  const episodes = listEpisodes(worldId);
+  const numberOf = new Map(episodes.map((e) => [e.id, e.episodeNumber]));
   return (
     <LibraryScreen
       world={{ id: world.id, name: world.name }}
@@ -38,17 +40,21 @@ export default async function LibraryPage({ params, searchParams }: Props) {
         chars: countChars(l.content),
         excerpt: excerpt(l.content),
       }))}
-      episodes={listEpisodes(worldId).map((e) => ({
+      episodes={episodes.map((e) => ({
         id: e.id,
+        kind: e.kind,
         episodeNumber: e.episodeNumber,
+        baseNumber: e.baseEpisodeId ? (numberOf.get(e.baseEpisodeId) ?? null) : null,
         title: e.title,
         accepted: Boolean(e.acceptedGenerationId),
         summarySaved: Boolean(e.summary.trim()),
         generationCount: e.generationCount,
         imageCount: e.imageCount,
       }))}
+      adopted={countAdopted(worldId)}
       images={listWorldImages(worldId).map((img) => ({
         ...toImageView(img),
+        episodeKind: img.episodeKind,
         episodeNumber: img.episodeNumber,
         episodeTitle: img.episodeTitle,
       }))}

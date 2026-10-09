@@ -3,7 +3,7 @@ import { EpisodeScreen } from '@/components/EpisodeScreen';
 import { settleStaleGeneration } from '@/lib/server/generation';
 import { taskState } from '@/lib/server/jobs';
 import { defaultChoice } from '@/lib/server/models';
-import { getEpisode, nextEpisode } from '@/lib/server/repo/episodes';
+import { getEpisode, nextMainEpisode } from '@/lib/server/repo/episodes';
 import { listGenerations, toGenerationView } from '@/lib/server/repo/generations';
 import { listEpisodeImages, toImageView } from '@/lib/server/repo/images';
 import { listProviders, toProviderView } from '@/lib/server/repo/providers';
@@ -33,6 +33,7 @@ export default async function EpisodePage({ params, searchParams }: Props) {
       world={{ id: world.id, name: world.name }}
       episode={{
         id: episode.id,
+        kind: episode.kind,
         episodeNumber: episode.episodeNumber,
         title: episode.title,
         acceptedGenerationId: episode.acceptedGenerationId,
@@ -52,7 +53,7 @@ export default async function EpisodePage({ params, searchParams }: Props) {
       imageJob={taskState('image', episodeId)}
       providers={listProviders().map(toProviderView)}
       imageDefault={defaultChoice('image')}
-      nextEpisodeId={nextEpisode(worldId, episode.episodeNumber)?.id ?? null}
+      nextEpisodeId={episode.kind === 'main' ? (nextMainEpisode(worldId, episode.episodeNumber)?.id ?? null) : null}
     />
   );
 }

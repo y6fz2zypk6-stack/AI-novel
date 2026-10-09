@@ -116,7 +116,7 @@ export function TabBar({ initialWorldId }: { initialWorldId: string | null }) {
       label: 'Library',
       href: worldId ? `/w/${worldId}/library` : '/',
       icon: Book,
-      active: /^\/w\/[^/]+\/(library|characters|lore)/.test(pathname),
+      active: /^\/w\/[^/]+\/(library|characters|lore|read)/.test(pathname),
       disabled: !worldId,
     },
     { label: 'Settings', href: '/settings', icon: SlidersHorizontal, active: pathname.startsWith('/settings') },

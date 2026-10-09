@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AlignLeft,
@@ -7,16 +8,21 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  GitBranchPlus,
   ImagePlus,
   MessageSquareText,
+  PenLine,
   RotateCw,
+  Sparkles,
   Square,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type TouchEvent } from 'react';
 import { api, errorMessage, formatNumber, formatTime } from '@/lib/client';
+import { episodeTitle } from '@/lib/episodes';
 import { contextFromSnapshot, type BuiltContext } from '@/lib/prompt';
 import { countChars } from '@/lib/tokens';
 import type {
+  EpisodeKind,
   GenerationPoll,
   GenerationView,
   ImageView,
@@ -29,6 +35,7 @@ import type {
 } from '@/lib/types';
 import { ContextSheet } from './ContextSheet';
 import { Dock, Header, Main, Page } from './chrome';
+import { EditSheet } from './EditSheet';
 import { ModelSheet } from './ModelSheet';
 import { Prose } from './Prose';
 import { Sheet } from './Sheet';
@@ -40,6 +47,7 @@ import {
   ErrorBanner,
   IconButton,
   Label,
+  LinkButton,
   SavedMark,
   SectionHeading,
   Spinner,
@@ -49,7 +57,13 @@ import {
 
 export type EpisodeProps = {
   world: { id: string; name: string };
-  episode: { id: string; episodeNumber: number; title: string; acceptedGenerationId: string | null };
+  episode: {
+    id: string;
+    kind: EpisodeKind;
+    episodeNumber: number;
+    title: string;
+    acceptedGenerationId: string | null;
+  };
   generations: GenerationView[];
   initialView: 'candidates' | 'adopted';
   initialGenerationId: string | null;
@@ -153,7 +167,6 @@ export function EpisodeScreen(props: EpisodeProps) {
   const [gens, setGens] = useState(props.generations);
   const [acceptedId, setAcceptedId] = useState(props.episode.acceptedGenerationId);
   const [summary, setSummary] = useState(props.summary);
-  const [summaryStartError, setSummaryStartError] = useState<string | null>(null);
   // 候補確認を開いたときに最初に表示する候補
   const [focusId, setFocusId] = useState(props.initialGenerationId);
 
@@ -171,7 +184,6 @@ export function EpisodeScreen(props: EpisodeProps) {
         acceptedId={acceptedId}
         summary={summary}
         setSummary={setSummary}
-        initialSummaryError={summaryStartError}
         onChange={() => {
           setFocusId(acceptedId);
           switchView('candidates', acceptedId);
@@ -186,10 +198,8 @@ export function EpisodeScreen(props: EpisodeProps) {
       gens={gens}
       setGens={setGens}
       acceptedId={acceptedId}
-      onAccepted={(id, s, error) => {
+      onAccepted={(id) => {
         setAcceptedId(id);
-        if (s) setSummary(s);
-        setSummaryStartError(error);
         switchView('adopted');
       }}
     />
@@ -210,7 +220,7 @@ function CandidatesView({
   gens: GenerationView[];
   setGens: (fn: (prev: GenerationView[]) => GenerationView[]) => void;
   acceptedId: string | null;
-  onAccepted: (id: string, summary: SummaryState | null, summaryError: string | null) => void;
+  onAccepted: (id: string) => void;
 }) {
   const [index, setIndex] = useState(() => {
     const target = initialGenerationId ?? acceptedId;
@@ -220,7 +230,7 @@ function CandidatesView({
   const thinking = useGenerationPolling(gens, setGens);
   const [busy, setBusy] = useState<'regen' | 'accept' | 'stop' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'revise' | 'snapshot' | null>(null);
+  const [sheet, setSheet] = useState<'revise' | 'snapshot' | 'edit' | null>(null);
   const [revisionNote, setRevisionNote] = useState('');
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -264,11 +274,8 @@ function CandidatesView({
     setBusy('accept');
     setActionError(null);
     try {
-      const res = await api<{ summaryError: string | null }>(`/api/episodes/${episode.id}/accept`, {
-        body: { generationId: current.id },
-      });
-      const s = await api<SummaryState>(`/api/episodes/${episode.id}/summary`).catch(() => null);
-      onAccepted(current.id, s, res.summaryError ? `要約を自動で作れませんでした。${res.summaryError}` : null);
+      await api(`/api/episodes/${episode.id}/accept`, { body: { generationId: current.id } });
+      onAccepted(current.id);
     } catch (err) {
       setActionError(errorMessage(err));
     } finally {
@@ -303,6 +310,7 @@ function CandidatesView({
 
   const isAccepted = current?.id === acceptedId;
   const canAccept = current && current.status !== 'generating' && current.content.trim().length > 0;
+  const canEdit = Boolean(canAccept);
 
   const meta = current
     ? [
@@ -317,7 +325,7 @@ function CandidatesView({
     <div className="mx-auto flex h-dvh max-w-[640px] flex-col">
       <Header
         back={`/w/${world.id}/write?ep=${episode.id}`}
-        title={`Episode ${episode.episodeNumber}`}
+        title={episodeTitle(episode.kind, episode.episodeNumber)}
         subtitle={
           episode.title ? <p className="truncate text-[13px] text-ink-muted">{episode.title}</p> : undefined
         }
@@ -379,7 +387,19 @@ function CandidatesView({
                 ))}
               </div>
             </div>
-            <p className="mt-2 truncate text-[12px] text-ink-muted">{meta}</p>
+            <div className="mt-1 flex items-center gap-2">
+              {current?.edited && <Badge>手修正済み</Badge>}
+              <p className="min-w-0 flex-1 truncate text-[12px] text-ink-muted">{meta}</p>
+              <button
+                type="button"
+                onClick={() => setSheet('edit')}
+                disabled={!canEdit || busy !== null}
+                className="-mr-2 inline-flex h-10 flex-none items-center gap-1 px-2 text-[13px] font-medium text-accent-ink disabled:opacity-40"
+              >
+                <PenLine size={15} aria-hidden />
+                手で直す
+              </button>
+            </div>
             {current?.revisionNote && (
               <p className="mt-1 line-clamp-2 text-[12px] leading-[1.6] text-ink-muted">
                 修正指示：{current.revisionNote}
@@ -508,6 +528,19 @@ function CandidatesView({
           generationId={current.id}
         />
       )}
+
+      {current && (
+        <EditSheet
+          open={sheet === 'edit'}
+          onClose={() => setSheet(null)}
+          title={`候補 ${index + 1} を手で直す`}
+          generation={current}
+          onSaved={(v) => {
+            setGens((prev) => prev.map((g) => (g.id === v.id ? { ...g, content: v.content, edited: v.edited } : g)));
+            setSheet(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -572,7 +605,6 @@ function AdoptedView({
   acceptedId,
   summary,
   setSummary,
-  initialSummaryError,
   onChange,
   images: initialImages,
   imageJob: initialImageJob,
@@ -584,16 +616,18 @@ function AdoptedView({
   acceptedId: string;
   summary: SummaryState;
   setSummary: (s: SummaryState) => void;
-  initialSummaryError: string | null;
   onChange: () => void;
 }) {
   const router = useRouter();
+  const side = episode.kind === 'side';
   const acceptedIndex = gens.findIndex((g) => g.id === acceptedId);
+  const accepted = gens[acceptedIndex] ?? null;
+  const [navError, setNavError] = useState<string | null>(null);
 
   // ---- 次話用の要約 ----
   const [text, setText] = useState(summary.draft ?? summary.summary);
   const [summaryError, setSummaryError] = useState<string | null>(
-    initialSummaryError ?? (summary.job?.status === 'error' ? summary.job.error : null),
+    summary.job?.status === 'error' ? summary.job.error : null,
   );
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -645,11 +679,12 @@ function AdoptedView({
   else if (summary.draftSource === 'ai' && text === summary.draft) badge = { label: '未保存・AI生成', tone: 'neutral' };
   else badge = { label: '未保存', tone: 'neutral' };
   const unsaved = text !== summary.summary;
+  // AI が一度でも要約を作っていれば「再生成」
+  const generatedBefore = summary.summaryGenerationId !== null;
 
   async function regenerateSummary() {
-    if (unsaved && summary.draftSource === 'edit' && !confirm('編集中の要約を、新しく生成した要約で置き換えます。よろしいですか？')) {
-      return;
-    }
+    const userText = unsaved && text.trim() !== '' && !(summary.draftSource === 'ai' && text === summary.draft);
+    if (userText && !confirm('編集中の要約を、新しく生成した要約で置き換えます。よろしいですか？')) return;
     setSummaryError(null);
     try {
       editedRef.current = false;
@@ -725,8 +760,8 @@ function AdoptedView({
     }
   }
 
-  // ---- 次のエピソードへ ----
-  const [goingNext, setGoingNext] = useState(false);
+  // ---- 次のエピソードへ / 番外編 ----
+  const [going, setGoing] = useState<'next' | 'side' | null>(null);
   async function goNext() {
     if (unsaved && text.trim()) {
       if (!confirm('編集中の要約を保存して、次のエピソードへ進みますか？')) return;
@@ -734,7 +769,8 @@ function AdoptedView({
     } else if (!summary.summary.trim() && !text.trim()) {
       if (!confirm('次話用の要約がありません。要約なしで次のエピソードへ進みますか？')) return;
     }
-    setGoingNext(true);
+    setGoing('next');
+    setNavError(null);
     try {
       let nextId = nextEpisodeId;
       if (!nextId) {
@@ -743,8 +779,29 @@ function AdoptedView({
       }
       router.push(`/w/${world.id}/write?ep=${nextId}`);
     } catch (err) {
-      setSummaryError(errorMessage(err));
-      setGoingNext(false);
+      setNavError(errorMessage(err));
+      setGoing(null);
+    }
+  }
+
+  /** この話の時点から番外編を作る（この話の保存済み要約を引き継ぐ） */
+  async function newSideStory() {
+    if (unsaved && text.trim()) {
+      if (!confirm('編集中の要約を保存して、この話の時点から番外編を作りますか？')) return;
+      if (!(await saveSummary())) return;
+    } else if (!summary.summary.trim()) {
+      if (!confirm('この話の要約がまだありません。要約なしで番外編を作りますか？')) return;
+    }
+    setGoing('side');
+    setNavError(null);
+    try {
+      const res = await api<{ episode: { id: string } }>(`/api/worlds/${world.id}/episodes`, {
+        body: { kind: 'side', baseEpisodeId: episode.id },
+      });
+      router.push(`/w/${world.id}/write?ep=${res.episode.id}`);
+    } catch (err) {
+      setNavError(errorMessage(err));
+      setGoing(null);
     }
   }
 
@@ -760,7 +817,7 @@ function AdoptedView({
     <Page>
       <Header
         back={`/w/${world.id}/write?ep=${episode.id}`}
-        title={`Episode ${episode.episodeNumber}`}
+        title={episodeTitle(episode.kind, episode.episodeNumber)}
         subtitle={
           episode.title ? <p className="truncate text-[13px] text-ink-muted">{episode.title}</p> : undefined
         }
@@ -768,7 +825,16 @@ function AdoptedView({
       <Main className="flex flex-col gap-[22px]">
         <div className="flex items-center gap-2 rounded-[14px] border border-accent-banner-line bg-accent-banner px-3.5 py-3 text-accent-ink">
           <Check size={18} aria-hidden className="flex-none" />
-          <p className="min-w-0 flex-1 text-[14px] font-medium">候補 {acceptedIndex + 1} を採用しました</p>
+          <p className="min-w-0 flex-1 text-[14px] font-medium">
+            候補 {acceptedIndex + 1} を採用しました
+            {accepted?.edited && <span className="text-[12px] font-normal">・手修正済み</span>}
+          </p>
+          <Link
+            href={`/w/${world.id}/read${side ? '?kind=side' : ''}#ep-${episode.id}`}
+            className="-my-2 inline-flex h-10 flex-none items-center px-1 text-[14px] font-bold underline-offset-2 hover:underline"
+          >
+            読む
+          </Link>
           <button
             type="button"
             onClick={onChange}
@@ -778,10 +844,17 @@ function AdoptedView({
           </button>
         </div>
 
+        {navError && <ErrorBanner message={navError} />}
+
         <section aria-labelledby="sec-summary">
           <SectionHeading id="sec-summary" right={<Badge tone={badge.tone}>{badge.label}</Badge>}>
-            次話用の要約
+            {side ? '要約（任意）' : '次話用の要約'}
           </SectionHeading>
+          {side && (
+            <p className="mb-2 text-[12px] leading-[1.6] text-ink-muted">
+              番外編の要約は本編へ引き継がれません。必要なときだけ作ってください。
+            </p>
+          )}
           {summaryError && <ErrorBanner className="mb-3" message={summaryError} onRetry={regenerateSummary} />}
           {staleSummary && !summaryRunning && (
             <p className="mb-2 text-[12px] leading-[1.6] text-ink-muted">
@@ -800,7 +873,11 @@ function AdoptedView({
               minHeight={270}
               maxHeight={420}
               strong
-              placeholder="次の話を書く AI に渡す要約です。「要約を再生成」で採用した本文から作れます。"
+              placeholder={
+                side
+                  ? 'この番外編の要約です。「要約を生成」で採用した本文から作れます。'
+                  : '次の話を書く AI に渡す要約です。「要約を生成」で採用した本文から作れます。手で書くこともできます。'
+              }
             />
             {summaryRunning && (
               <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-field bg-bg/80 text-[14px] text-ink-muted">
@@ -815,9 +892,9 @@ function AdoptedView({
               className="flex-1"
               onClick={regenerateSummary}
               disabled={summaryRunning}
-              icon={<RotateCw size={17} aria-hidden />}
+              icon={generatedBefore ? <RotateCw size={17} aria-hidden /> : <Sparkles size={17} aria-hidden />}
             >
-              要約を再生成
+              {generatedBefore ? '要約を再生成' : '要約を生成'}
             </Button>
             <Button
               variant="primary"
@@ -880,17 +957,34 @@ function AdoptedView({
       </Main>
 
       <Dock>
-        <Button
-          variant="outline"
-          size="lg"
-          className="flex-1"
-          onClick={goNext}
-          busy={goingNext}
-          busyLabel="準備中…"
-        >
-          次のエピソードへ
-          <ArrowRight size={18} aria-hidden />
-        </Button>
+        {side ? (
+          <LinkButton href={`/w/${world.id}/write`} variant="outline" size="lg" className="flex-1">
+            本編に戻る
+            <ArrowRight size={18} aria-hidden />
+          </LinkButton>
+        ) : (
+          <>
+            <DockButton
+              label="番外編"
+              icon={<GitBranchPlus size={20} aria-hidden />}
+              onClick={newSideStory}
+              busy={going === 'side'}
+              disabled={going !== null}
+            />
+            <Button
+              variant="outline"
+              size="lg"
+              className="flex-1"
+              onClick={goNext}
+              disabled={going !== null}
+              busy={going === 'next'}
+              busyLabel="準備中…"
+            >
+              次のエピソードへ
+              <ArrowRight size={18} aria-hidden />
+            </Button>
+          </>
+        )}
       </Dock>
 
       <Sheet

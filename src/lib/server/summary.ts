@@ -10,8 +10,9 @@ import { getGeneration } from './repo/generations';
 import { getSettings } from './repo/providers';
 
 /**
- * 採用した本文から次話用の要約を作る（機能仕様 §15）。
+ * 採用した本文から次話用の要約を作る（機能仕様 §15）。採用とは別に、ユーザーが押したときだけ作る。
  * 結果は「未保存の下書き」として残し、ユーザーが確認して保存するまで確定しない（§16）。
+ * 手で直した本文は、直したあとの本文から作る。
  */
 export function startSummary(episodeId: string): void {
   const ep = getEpisode(episodeId);
@@ -24,6 +25,7 @@ export function startSummary(episodeId: string): void {
   }
   const { provider, model } = resolveModel('summary');
   const messages = buildSummaryMessages({
+    episodeKind: ep.kind,
     episodeNumber: ep.episodeNumber,
     episodeTitle: ep.title,
     previousSummary: ep.previousSummary,

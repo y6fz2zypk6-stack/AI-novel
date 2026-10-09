@@ -2,8 +2,9 @@
 // 画面の Context Preview とサーバーの本文生成が同じ関数を使うので、
 // プレビューに出た内容がそのまま Provider へ送られる。
 
+import { episodeOrdinal } from './episodes';
 import { countChars, estimateTokens } from './tokens';
-import type { ChatMessage } from './types';
+import type { ChatMessage, EpisodeKind } from './types';
 
 export const SYSTEM_INSTRUCTION = [
   'あなたは日本語の小説を書く作家です。',
@@ -18,12 +19,16 @@ export const OUTPUT_INSTRUCTION = [
 ].join('\n');
 
 export const NO_INSTRUCTION_TEXT = '（特別な指示はありません。これまでの続きを自然に書いてください。）';
+export const NO_INSTRUCTION_TEXT_SIDE = '（特別な指示はありません。本編の設定を踏まえて、番外編を自由に書いてください。）';
+export const SIDE_STORY_NOTE = 'これは本編の続きではなく、本編とは別の番外編です。';
 
 export type ContextInput = {
   worldInstruction: string;
   characters: { name: string; content: string }[];
   lore: { title: string; content: string }[];
   previousSummary: string;
+  /** 省略時は本編 */
+  episodeKind?: EpisodeKind;
   episodeNumber: number;
   episodeTitle: string;
   episodeInstruction: string;
@@ -75,6 +80,7 @@ function entries(items: { heading: string; content: string }[]): string {
 
 export function buildContext(input: ContextInput): BuiltContext {
   const sections: ContextSection[] = [];
+  const side = input.episodeKind === 'side';
 
   sections.push(section('system', 'System', `[SYSTEM]\n${input.systemInstruction ?? SYSTEM_INSTRUCTION}`));
 
@@ -94,13 +100,19 @@ export function buildContext(input: ContextInput): BuiltContext {
   const previous = input.previousSummary.trim();
   if (previous) {
     sections.push(
-      section('previous', '前回までの要約', `[PREVIOUS STORY]\n前回までに以下の出来事が発生した。\n\n${previous}`),
+      side
+        ? section('previous', '本編の要約', `[PREVIOUS STORY]\n本編では、これまでに以下の出来事が発生した。\n\n${previous}`)
+        : section('previous', '前回までの要約', `[PREVIOUS STORY]\n前回までに以下の出来事が発生した。\n\n${previous}`),
     );
   }
 
   const title = input.episodeTitle.trim();
-  const heading = `エピソード：第${input.episodeNumber}話${title ? `「${title}」` : ''}`;
-  const instruction = input.episodeInstruction.trim() || NO_INSTRUCTION_TEXT;
+  const kind = input.episodeKind ?? 'main';
+  const heading = [
+    `エピソード：${episodeOrdinal(kind, input.episodeNumber)}${title ? `「${title}」` : ''}`,
+    ...(side ? [SIDE_STORY_NOTE] : []),
+  ].join('\n');
+  const instruction = input.episodeInstruction.trim() || (side ? NO_INSTRUCTION_TEXT_SIDE : NO_INSTRUCTION_TEXT);
   sections.push(
     section('instruction', '今回の指示', `[CURRENT INSTRUCTION]\n${heading}\n\n${instruction}`),
   );
@@ -152,15 +164,20 @@ export function buildContext(input: ContextInput): BuiltContext {
 // ---- 要約（機能仕様 §15） ----
 
 export function buildSummaryMessages(input: {
+  /** 省略時は本編。番外編の要約は本編へ引き継がないので、その話だけをまとめる */
+  episodeKind?: EpisodeKind;
   episodeNumber: number;
   episodeTitle: string;
   previousSummary: string;
   text: string;
 }): ChatMessage[] {
+  const kind = input.episodeKind ?? 'main';
   const title = input.episodeTitle.trim();
-  const previous = input.previousSummary.trim();
+  const previous = kind === 'side' ? '' : input.previousSummary.trim();
   const user = [
-    '以下の小説本文を、次のエピソードを書くAIが必要とする情報だけに整理してください。',
+    kind === 'side'
+      ? '以下の小説本文（本編とは別の番外編）を、あとから参照できるよう、必要な情報だけに整理してください。'
+      : '以下の小説本文を、次のエピソードを書くAIが必要とする情報だけに整理してください。',
     previous
       ? '「これまでの要約」のうち今後も必要な情報は引き継ぎ、今回の本文で変わった情報は更新して、1つの要約にまとめてください。'
       : '',
@@ -182,7 +199,7 @@ export function buildSummaryMessages(input: {
     '項目ごとに見出しと箇条書きで書き、該当がない項目は「なし」と書いてください。要約だけを出力してください。',
     '',
     ...(previous ? ['[これまでの要約]', previous, ''] : []),
-    `[今回の本文：第${input.episodeNumber}話${title ? `「${title}」` : ''}]`,
+    `[今回の本文：${episodeOrdinal(kind, input.episodeNumber)}${title ? `「${title}」` : ''}]`,
     input.text.trim(),
   ]
     .filter((line, i, all) => !(line === '' && all[i - 1] === ''))
@@ -264,6 +281,7 @@ export function contextFromSnapshot(snap: {
   characters: { name: string; content: string }[];
   lore: { title: string; content: string }[];
   previousSummary: string;
+  episodeKind?: EpisodeKind;
   episodeNumber: number;
   episodeTitle: string;
   episodeInstruction: string;

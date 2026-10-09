@@ -6,6 +6,7 @@ import {
   cleanImagePrompt,
   contextFromSnapshot,
   NO_INSTRUCTION_TEXT,
+  NO_INSTRUCTION_TEXT_SIDE,
   OUTPUT_INSTRUCTION,
   SYSTEM_INSTRUCTION,
   toParagraphs,
@@ -53,6 +54,17 @@ describe('buildContext（機能仕様 §10 の順序）', () => {
       ['system', 'instruction', 'output'],
     );
     assert.ok(!ctx.messages[1].content.includes('[CHARACTERS]'));
+  });
+
+  it('番外編は見出しと注記で本編と区別する', () => {
+    const ctx = buildContext({ ...base, episodeKind: 'side', episodeNumber: 2, episodeInstruction: '' });
+    const user = ctx.messages[1].content;
+    assert.match(user, /エピソード：番外編2「雨の屋上」\nこれは本編の続きではなく、本編とは別の番外編です。/);
+    assert.match(user, /本編では、これまでに以下の出来事が発生した。/);
+    assert.ok(user.includes(NO_INSTRUCTION_TEXT_SIDE));
+    assert.equal(ctx.sections.find((s) => s.key === 'previous')?.label, '本編の要約');
+    // 種類を省略したら本編
+    assert.match(buildContext(base).messages[1].content, /エピソード：第12話「雨の屋上」\n\n/);
   });
 
   it('今回の指示が空なら、続きを書く旨の指示を入れる', () => {
@@ -113,6 +125,19 @@ describe('要約・画像 Prompt', () => {
     assert.match(msgs[1].content, /\[これまでの要約\]\n前の要約/);
     assert.match(msgs[1].content, /未回収の伏線/);
     assert.match(msgs[1].content, /\[今回の本文：第3話\]\n本文$/);
+  });
+
+  it('番外編の要約は、その話だけをまとめる（本編の要約を混ぜない）', () => {
+    const msgs = buildSummaryMessages({
+      episodeKind: 'side',
+      episodeNumber: 2,
+      episodeTitle: '夏祭り',
+      previousSummary: '本編の要約',
+      text: '本文',
+    });
+    assert.ok(!msgs[1].content.includes('本編の要約'));
+    assert.match(msgs[1].content, /本編とは別の番外編/);
+    assert.match(msgs[1].content, /\[今回の本文：番外編2「夏祭り」\]\n本文$/);
   });
 
   it('最初の話では「これまでの要約」を入れない', () => {

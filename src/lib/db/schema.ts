@@ -57,7 +57,17 @@ export const episodes = sqliteTable(
     worldId: text('world_id')
       .notNull()
       .references(() => worlds.id, { onDelete: 'cascade' }),
+    /** 'main' = 本編 / 'side' = 番外編（本編とは別に番号を振り、要約を本編へ引き継がない） */
+    kind: text('kind', { enum: ['main', 'side'] }).notNull().default('main'),
+    /** 本編・番外編それぞれの中での番号 */
     episodeNumber: integer('episode_number').notNull(),
+    /**
+     * 番外編の土台にした本編の話（その時点の要約と人物・ロアの選択を引き継いだ）。本編では null。
+     * マイグレーション 0001 の ON DELETE SET NULL は手で追記した（drizzle-kit が ADD COLUMN で落とすため）
+     */
+    baseEpisodeId: text('base_episode_id').references((): AnySQLiteColumn => episodes.id, {
+      onDelete: 'set null',
+    }),
     title: text('title').notNull().default(''),
     instruction: text('instruction').notNull().default(''),
     previousSummary: text('previous_summary').notNull().default(''),
@@ -79,7 +89,7 @@ export const episodes = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [uniqueIndex('episodes_world_number_uq').on(t.worldId, t.episodeNumber)],
+  (t) => [uniqueIndex('episodes_world_kind_number_uq').on(t.worldId, t.kind, t.episodeNumber)],
 );
 
 export const episodeCharacters = sqliteTable(
@@ -118,7 +128,11 @@ export const generations = sqliteTable(
     /** 生成時点の Provider 名（Provider を後で消しても表示できるように） */
     provider: text('provider').notNull(),
     model: text('model').notNull(),
+    /** 本文（手で直した場合は直したあとの本文） */
     content: text('content').notNull().default(''),
+    /** 手で直す前の AI の原文。手で直していなければ null */
+    originalContent: text('original_content'),
+    editedAt: integer('edited_at'),
     /** 生成時点のコンテキスト一式。作成後は変更しない */
     promptSnapshot: text('prompt_snapshot', { mode: 'json' }).$type<PromptSnapshot>().notNull(),
     generationSettings: text('generation_settings', { mode: 'json' })

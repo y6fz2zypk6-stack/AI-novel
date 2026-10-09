@@ -1,6 +1,6 @@
 import 'server-only';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import { characters, episodes, lore, worlds, type CharacterRow, type LoreRow, type WorldRow } from '@/lib/db/schema';
+import { asc, eq, sql } from 'drizzle-orm';
+import { characters, lore, worlds, type CharacterRow, type LoreRow, type WorldRow } from '@/lib/db/schema';
 import { getDb } from '../db';
 import { newId } from '../ids';
 
@@ -17,7 +17,7 @@ export function listWorlds(): WorldListItem[] {
     .select({
       world: worlds,
       // 相関サブクエリは列名を明示的に修飾する（Drizzle の補間はテーブル名を付けないため）
-      latestEpisodeNumber: sql<number | null>`(select max(e.episode_number) from episodes e where e.world_id = "worlds"."id")`,
+      latestEpisodeNumber: sql<number | null>`(select max(e.episode_number) from episodes e where e.world_id = "worlds"."id" and e.kind = 'main')`,
       episodeActivity: sql<number | null>`(select max(e.updated_at) from episodes e where e.world_id = "worlds"."id")`,
       characterCount: sql<number>`(select count(*) from characters c where c.world_id = "worlds"."id")`,
       loreCount: sql<number>`(select count(*) from lore l where l.world_id = "worlds"."id")`,
@@ -140,13 +140,3 @@ export function deleteLore(id: string): void {
   getDb().delete(lore).where(eq(lore.id, id)).run();
 }
 
-/** World 内の最新 Episode（番号が最大のもの） */
-export function latestEpisodeId(worldId: string): string | undefined {
-  return getDb()
-    .select({ id: episodes.id })
-    .from(episodes)
-    .where(and(eq(episodes.worldId, worldId)))
-    .orderBy(desc(episodes.episodeNumber))
-    .limit(1)
-    .get()?.id;
-}

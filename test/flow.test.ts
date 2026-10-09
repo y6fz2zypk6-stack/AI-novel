@@ -186,6 +186,112 @@ describe('執筆の一連の流れ', () => {
     assert.equal(stale.delta, '途中まで', '途中までの本文は残す');
   });
 
+  it('手で直す・番外編・通して読む', async () => {
+    const worlds = await import('../src/lib/server/repo/worlds');
+    const episodes = await import('../src/lib/server/repo/episodes');
+    const gens = await import('../src/lib/server/repo/generations');
+    const { startGeneration, pollGeneration } = await import('../src/lib/server/generation');
+    const { startSummary } = await import('../src/lib/server/summary');
+    const { taskState } = await import('../src/lib/server/jobs');
+
+    const w = worlds.createWorld({ name: '番外編のある World', description: '', baseInstruction: '' });
+    const hero = worlds.createCharacter(w.id, { name: 'ユウ', content: '主人公。' });
+    const m1 = episodes.createEpisode(w.id);
+    episodes.updateEpisodeDraft(m1.id, { title: '始まり', characterIds: [hero.id] });
+    const g = startGeneration(m1.id);
+    await until(() => pollGeneration(g, 0).status === 'done');
+    const ai = gens.getGeneration(g)!.content;
+
+    // 手で直す：何度直しても、残す原文は最初の AI の本文
+    gens.editGenerationContent(g, `${ai}\n（手で追記）`);
+    gens.editGenerationContent(g, `${ai}\n（さらに直した）`);
+    let row = gens.getGeneration(g)!;
+    assert.equal(row.originalContent, ai);
+    assert.match(row.content, /さらに直した/);
+    assert.equal(gens.toGenerationView(row).edited, true);
+    // 原文と同じ内容に戻したら、手修正なしの状態に戻る
+    gens.editGenerationContent(g, ai);
+    row = gens.getGeneration(g)!;
+    assert.equal(row.originalContent, null);
+    assert.equal(gens.toGenerationView(row).edited, false);
+    // AI の原文に戻す
+    gens.editGenerationContent(g, '一度直した本文');
+    gens.revertGenerationContent(g);
+    row = gens.getGeneration(g)!;
+    assert.equal(row.content, ai);
+    assert.equal(row.editedAt, null);
+
+    // 直した本文は、修正指示と要約に使われる
+    gens.editGenerationContent(g, '直した本文です。');
+    episodes.setAccepted(m1.id, g);
+    assert.equal(taskState('summary', m1.id), null, '採用しただけでは要約を作らない');
+    const r = startGeneration(m1.id, { revisionOf: g, revisionNote: '短く' });
+    await until(() => pollGeneration(r, 0).status === 'done');
+    assert.equal(gens.getGeneration(r)!.promptSnapshot.revision?.baseContent, '直した本文です。');
+    await fetch(`http://127.0.0.1:${MOCK_PORT}/__calls`, { method: 'DELETE' });
+    startSummary(m1.id);
+    await until(() => taskState('summary', m1.id) === null);
+    const { calls } = (await (await fetch(`http://127.0.0.1:${MOCK_PORT}/__calls`)).json()) as {
+      calls: { body: { messages: { content: string }[] } }[];
+    };
+    assert.match(calls.at(-1)!.body.messages[1].content, /\[今回の本文：第1話「始まり」\]\n直した本文です。$/);
+    episodes.saveSummary(m1.id, '本編1話の要約');
+
+    // 番外編：番号は本編と別。本編の要約と人物の選択を受け取る
+    const s1 = episodes.createEpisode(w.id, 'side');
+    assert.deepEqual([s1.kind, s1.episodeNumber, s1.baseEpisodeId], ['side', 1, m1.id]);
+    assert.equal(s1.previousSummary, '本編1話の要約');
+    assert.deepEqual(episodes.getEpisode(s1.id)!.characterIds, [hero.id]);
+    const sg = startGeneration(s1.id);
+    await until(() => pollGeneration(sg, 0).status === 'done');
+    const snap = gens.getGeneration(sg)!.promptSnapshot;
+    assert.equal(snap.episodeKind, 'side');
+    assert.match(snap.messages[1].content, /エピソード：番外編1\nこれは本編の続きではなく、本編とは別の番外編です。/);
+    assert.match(snap.messages[1].content, /本編では、これまでに以下の出来事が発生した。\n\n本編1話の要約/);
+    episodes.setAccepted(s1.id, sg);
+    startSummary(s1.id);
+    await until(() => taskState('summary', s1.id) === null);
+    assert.match(episodes.getEpisode(s1.id)!.summaryDraft ?? '', /起きた出来事/);
+    episodes.saveSummary(s1.id, '番外編の要約');
+
+    // 本編の次の話は、番外編ではなく本編の要約を受け取る
+    const m2 = episodes.createEpisode(w.id);
+    assert.deepEqual([m2.kind, m2.episodeNumber, m2.baseEpisodeId], ['main', 2, null]);
+    assert.equal(m2.previousSummary, '本編1話の要約');
+    assert.equal(episodes.nextMainEpisode(w.id, 1)?.id, m2.id);
+    assert.equal(episodes.previousMainEpisode(w.id, 2)?.id, m1.id);
+    assert.equal(episodes.latestMainEpisode(w.id)?.id, m2.id);
+
+    // 土台を指定しない番外編は、要約を保存してある本編の最新話（m2 は未保存なので m1）から
+    const s2 = episodes.createEpisode(w.id, 'side');
+    assert.deepEqual([s2.episodeNumber, s2.baseEpisodeId], [2, m1.id]);
+    const s3 = episodes.createEpisode(w.id, 'side', { baseEpisodeId: m2.id });
+    assert.deepEqual([s3.episodeNumber, s3.baseEpisodeId, s3.previousSummary], [3, m2.id, '']);
+    assert.throws(() => episodes.createEpisode(w.id, 'side', { baseEpisodeId: s1.id }), '番外編は土台にできない');
+
+    // 一覧：本編を先に、それぞれ新しい順。World 一覧の最新話は本編だけで数える
+    assert.deepEqual(
+      episodes.listEpisodes(w.id).map((e) => `${e.kind}${e.episodeNumber}`),
+      ['main2', 'main1', 'side3', 'side2', 'side1'],
+    );
+    assert.equal(worlds.listWorlds().find((x) => x.id === w.id)!.latestEpisodeNumber, 2);
+
+    // 通して読む：採用した本文だけを番号順に
+    assert.deepEqual(
+      episodes.listAdoptedTexts(w.id, 'main').map((t) => [t.episodeNumber, t.content, t.edited]),
+      [[1, '直した本文です。', true]],
+    );
+    assert.deepEqual(
+      episodes.listAdoptedTexts(w.id, 'side').map((t) => [t.episodeNumber, t.baseNumber, t.edited]),
+      [[1, 1, false]],
+    );
+    assert.deepEqual(episodes.countAdopted(w.id), { main: 1, side: 1 });
+
+    // 土台にした本編の話を消しても、番外編は残る
+    episodes.deleteEpisode(m2.id);
+    assert.equal(episodes.getEpisode(s3.id)?.baseEpisodeId, null);
+  });
+
   it('API キーが無い OpenRouter では生成を始めない', async () => {
     const providers = await import('../src/lib/server/repo/providers');
     const { resolveModel } = await import('../src/lib/server/models');

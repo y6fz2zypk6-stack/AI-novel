@@ -3,7 +3,7 @@ import { desc, eq, inArray, sql } from 'drizzle-orm';
 import fs from 'node:fs';
 import path from 'node:path';
 import { episodes, images, type ImageRow } from '@/lib/db/schema';
-import type { ImageView } from '@/lib/types';
+import type { EpisodeKind, ImageView } from '@/lib/types';
 import { getDb } from '../db';
 import { dataDir } from '../paths';
 
@@ -27,15 +27,27 @@ export function listEpisodeImages(episodeId: string): ImageRow[] {
   return getDb().select().from(images).where(eq(images.episodeId, episodeId)).orderBy(desc(images.createdAt), sql`"images".rowid desc`).all();
 }
 
-export function listWorldImages(worldId: string): (ImageRow & { episodeNumber: number; episodeTitle: string })[] {
+export function listWorldImages(
+  worldId: string,
+): (ImageRow & { episodeKind: EpisodeKind; episodeNumber: number; episodeTitle: string })[] {
   return getDb()
-    .select({ image: images, episodeNumber: episodes.episodeNumber, episodeTitle: episodes.title })
+    .select({
+      image: images,
+      episodeKind: episodes.kind,
+      episodeNumber: episodes.episodeNumber,
+      episodeTitle: episodes.title,
+    })
     .from(images)
     .innerJoin(episodes, eq(episodes.id, images.episodeId))
     .where(eq(episodes.worldId, worldId))
     .orderBy(desc(images.createdAt), sql`"images".rowid desc`)
     .all()
-    .map((r) => ({ ...r.image, episodeNumber: r.episodeNumber, episodeTitle: r.episodeTitle }));
+    .map((r) => ({
+      ...r.image,
+      episodeKind: r.episodeKind,
+      episodeNumber: r.episodeNumber,
+      episodeTitle: r.episodeTitle,
+    }));
 }
 
 export function getImage(id: string): ImageRow | undefined {

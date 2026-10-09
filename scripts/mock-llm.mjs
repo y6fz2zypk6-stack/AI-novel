@@ -182,7 +182,7 @@ const server = http.createServer(async (req, res) => {
 
     const userText = (body.messages ?? []).map((m) => m.content).join('\n');
     let text = STORY;
-    if (userText.includes('次のエピソードを書くAIが必要とする情報')) text = SUMMARY;
+    if (userText.includes('[今回の本文：')) text = SUMMARY;
     else if (userText.includes('画像生成プロンプト')) text = IMAGE_PROMPT;
     else if (userText.includes('[REVISION]')) text = `（修正版）\n${STORY}`;
 
